@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Receipt</title>
+  <style id="pageSize">
+    @page { size: 58mm auto; margin: 0; }
+    html, body { padding: 0; margin: 0; }
+  </style>
+  <style>
+    body { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .wrap { width: 58mm; padding: 6px 6px 24px; box-sizing: border-box; }
+    .center { text-align: center; }
+    .right { text-align: right; }
+    .muted { opacity: .8; }
+    hr { border: none; border-top: 1px dashed #000; margin: 6px 0; }
+    table { width: 100%; border-collapse: collapse; }
+    td { vertical-align: top; font-size: 12px; line-height: 1.25; padding: 2px 0; }
+    .totals td { font-weight: bold; }
+    .small { font-size: 11px; }
+    .big { font-size: 14px; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="wrap" id="paper">
+    <div class="center">
+      <div class="big" id="outlet">Outlet</div>
+      <div class="small muted" id="address"></div>
+      <div class="small muted" id="phone"></div>
+    </div>
+    <hr />
+    <table>
+      <tr>
+        <td>Ticket</td><td class="right" id="ticket">-</td>
+      </tr>
+      <tr>
+        <td>Date</td><td class="right" id="ts">-</td>
+      </tr>
+      <tr id="cashierRow" style="display:none;">
+        <td>Cashier</td><td class="right" id="cashier">-</td>
+      </tr>
+    </table>
+
+    <hr />
+    <table id="itemsTable"></table>
+    <hr />
+
+    <table class="totals">
+      <tr id="subtotalRow" style="display:none;">
+        <td>Subtotal</td><td class="right" id="subtotal">Rp 0</td>
+      </tr>
+      <tr id="discountRow" style="display:none;">
+        <td>Discount</td><td class="right" id="discount">Rp 0</td>
+      </tr>
+      <tr id="taxRow" style="display:none;">
+        <td>Tax</td><td class="right" id="tax">Rp 0</td>
+      </tr>
+      <tr>
+        <td>Total</td><td class="right" id="total">Rp 0</td>
+      </tr>
+      <tr id="cashRow" style="display:none;">
+        <td>Cash</td><td class="right" id="cash">Rp 0</td>
+      </tr>
+      <tr id="changeRow" style="display:none;">
+        <td>Change</td><td class="right" id="change">Rp 0</td>
+      </tr>
+    </table>
+
+    <hr />
+    <div class="center small muted" id="footer">Thank you!</div>
+  </div>
+
+  <script>
+    // --- Helpers ---
+    const qs = new URLSearchParams(location.search);
+    const id = (x) => document.getElementById(x);
+    const money = (n) => {
+      const num = Number(n ?? 0);
+      return 'Rp ' + num.toLocaleString('id-ID');
+    };
+    const show = (rowId, cond) => { const el = id(rowId); if (el) el.style.display = cond ? '' : 'none'; };
+
+    // --- Page size (58mm or 80mm) ---
+    const widthParam = (qs.get('w') || '58').trim();
+    const width = (widthParam === '80') ? '80mm' : '58mm';
+    id('pageSize').innerHTML = `@page { size: ${width} auto; margin: 0; } html, body { padding:0; margin:0; }`;
+    const wrap = document.getElementById('paper'); if (wrap) wrap.style.width = width;
+
+    // --- Header ---
+    id('outlet').textContent  = qs.get('outlet')  || 'Outlet';
+    id('address').textContent = qs.get('addr')    || '';
+    id('phone').textContent   = qs.get('tel')     || '';
+    id('footer').textContent  = qs.get('footer')  || 'Thank you!';
+
+    // --- Ticket meta ---
+    id('ticket').textContent  = qs.get('ticket')  || '-';
+    const tsRaw = qs.get('ts');
+    const ts = tsRaw ? new Date(tsRaw) : new Date();
+    id('ts').textContent      = ts.toLocaleString('id-ID', { hour12: false });
+
+    const cashier = qs.get('cashier');
+    if (cashier) { id('cashier').textContent = cashier; show('cashierRow', true); }
+
+    // --- Items ---
+    // Expect items param as: name|qty|price;name|qty|price;...
+    const itemsStr = qs.get('items') || '';
+    const items = itemsStr
+      .split(';')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(s => {
+        const [name, qty, price] = s.split('|');
+        return { name: decodeURIComponent(name || ''), qty: Number(qty || 1), price: Number(price || 0) };
+      });
+
+    const itemsTable = id('itemsTable');
+    let computedSubtotal = 0;
+    items.forEach(it => {
+      const lineTotal = it.qty * it.price;
+      computedSubtotal += lineTotal;
+      const tr = document.createElement('tr');
+      const tdLeft = document.createElement('td');
+      const tdRight = document.createElement('td');
+      tdLeft.innerHTML = `${it.name}<br><span class="muted small">x${it.qty} @ ${money(it.price)}</span>`;
+      tdRight.className = 'right';
+      tdRight.textContent = money(lineTotal);
+      tr.appendChild(tdLeft);
+      tr.appendChild(tdRight);
+      itemsTable.appendChild(tr);
+    });
+
+    // --- Totals (allow override via query) ---
+    const subtotal = Number(qs.get('subtotal') ?? computedSubtotal);
+    const discount = Number(qs.get('discount') ?? 0);
+    const tax      = Number(qs.get('tax') ?? 0);
+    const total    = Number(qs.get('total')   ?? (subtotal - discount + tax));
+    const cash     = qs.get('cash')    != null ? Number(qs.get('cash'))    : null;
+    const change   = qs.get('change')  != null ? Number(qs.get('change'))  : (cash != null ? (cash - total) : null);
+
+    if (qs.has('subtotal')) show('subtotalRow', true);
+    if (qs.has('discount')) show('discountRow', true);
+    if (qs.has('tax'))      show('taxRow', true);
+    if (cash != null)       show('cashRow', true);
+    if (change != null)     show('changeRow', true);
+
+    id('subtotal').textContent = money(subtotal);
+    id('discount').textContent = money(discount);
+    id('tax').textContent      = money(tax);
+    id('total').textContent    = money(total);
+    if (cash != null)   id('cash').textContent   = money(cash);
+    if (change != null) id('change').textContent = money(change);
+
+    // --- Auto print & optional auto-close ---
+    const doClose = (qs.get('close') === '1');
+    window.onload = () => {
+      window.print();
+    };
+    window.onafterprint = () => {
+      if (doClose) window.close();
+    };
+  </script>
+</body>
+</html>
